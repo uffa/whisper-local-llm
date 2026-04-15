@@ -1,10 +1,14 @@
 # whisper-local-llm
 
-Hotkey-triggered local speech-to-text using [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Hold a key to record, release to transcribe, and the resulting text lands on your clipboard — all running locally on your machine, no cloud. Map the hotkey to a foot pedal if you want push-to-talk hands-free; any Stream Deck / macro tool that can send NumpadAdd or NumpadEnter will work.
+**Built by [Matt Uffalussy](https://github.com/uffa)** for my own Windows dictation workflow. Written by me with heavy pair-programming assistance from Claude Code (Anthropic) and occasional design consultation with ChatGPT — the direction, architecture, debugging, and review decisions are mine; the AI tools were fast typists and sounding boards. Everything here was tested end-to-end on my own hardware before publishing.
+
+---
+
+Hotkey-triggered local speech-to-text using [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Hold a key to record, release to transcribe, and the resulting text lands on your clipboard — all running locally on your machine, no cloud. Map the hotkey to a foot pedal if you want push-to-talk hands-free; any Stream Deck / macro tool that can send a numpad `+` will work.
 
 ## How it works
 
-1. An AutoHotkey v2 script binds **NumpadAdd (`+`)** and **NumpadEnter** as push-to-talk keys. Both are bound while I'm deciding which feels better ergonomically.
+1. An AutoHotkey v2 script binds **NumpadAdd (`+`)** — the `+` key next to the numpad — as a push-to-talk key.
 2. While held, `ffmpeg` records 16 kHz mono WAV from your microphone.
 3. On release, ffmpeg is gracefully stopped (via `"q\n"` written to its stdin pipe, so it finalizes the WAV header cleanly) and a PowerShell wrapper runs `whisper-cli.exe` against the recording.
 4. The resulting transcript is copied to the clipboard, saved next to the WAV, and a custom toast notification confirms the result.
@@ -49,13 +53,13 @@ The PowerShell transcription wrapper auto-detects the newest installed CUDA tool
 
 ## Usage
 
-- **Hold NumpadAdd (`+`) or NumpadEnter** to start recording. A "Recording..." toast stays visible for the entire duration.
+- **Hold NumpadAdd (the `+` next to your numpad)** to start recording. A "Recording..." toast stays visible for the entire duration.
 - **Release** to stop and transcribe. The transcript is copied to your clipboard, written next to the WAV as `<recording>.wav.txt`, and a "Transcript copied to clipboard" toast confirms.
 - **Recordings shorter than `minRecordMs` (700 ms)** are silently discarded.
 - **Recordings over `maxRecordMs` (90 s)** auto-stop and transcribe anyway.
 - A copy of the most recent transcript is kept at `last-transcript.txt` in the project root.
 
-The numpad `+` and Enter keys have their normal behavior suppressed while the script is running (pressing them won't type `+` or insert newlines). Use the physical keys next to your numpad.
+The numpad `+` has its normal behavior suppressed while the script is running (pressing it won't type `+`). The script's `StartRecording` / `StopRecording` functions take a `triggerKey` argument and log it, so adding a second binding (e.g. `NumpadEnter`) is a two-line change — useful if you want to A/B test which key feels better and `grep whisper.log` later to see which you used more.
 
 ## Configuration
 
@@ -93,17 +97,6 @@ For anyone reading the code and wondering why `StartRecording` uses a `DllCall("
 - **`CreateProcessW` with `STARTF_USESHOWWINDOW | SW_HIDE` and no `CREATE_NO_WINDOW`** — hides the window from the first frame, keeps a real console alive (so dshow works), and we can wire up our own anonymous `CreatePipe` for stdin. Zero flash, full control.
 
 The helper `LaunchFfmpegHidden()` in [scripts/whisper-record.ahk](scripts/whisper-record.ahk) encapsulates all of this. Related helpers: `WritePipeString`, `IsProcessAlive`, `SafeCloseHandle`.
-
-## Hotkey ergonomics (A/B)
-
-NumpadAdd and NumpadEnter are both bound on purpose — `StartRecording`/`StopRecording` take a `triggerKey` argument and log which one fired. To see which you use more often, `grep` the log:
-
-```
-grep -c "recording start via NumpadAdd"   whisper.log
-grep -c "recording start via NumpadEnter" whisper.log
-```
-
-If you ever start with one key and stop with the other, a `MISMATCH(start=…)` line shows up — helps catch weird cross-key behavior while comparing. Once you pick a favorite, just remove the unwanted binding.
 
 ## Logs and debugging
 
