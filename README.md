@@ -88,7 +88,7 @@ The script draws its own dark-themed toast in the bottom-right corner rather tha
 Two toast variants:
 
 - **Status toasts** (`"Recording..."`, `"Transcribing..."`, errors) — compact single-line layout with the icon vertically centered against the text via `SS_CENTERIMAGE`.
-- **"Copied to clipboard" toast** — wider layout with a bold title and the actual transcript body underneath in italic. The body is rendered at a larger font size (`s16`) for easy reading at a glance. The full transcript is always on the clipboard; only the toast display is truncated at 400 characters.
+- **"Copied to clipboard" toast** — wider layout with a bold Segoe UI title and the actual transcript body underneath in [Lora](https://fonts.google.com/specimen/Lora), a serif designed for on-screen body text. The full transcript is always on the clipboard; only the toast display is truncated at 400 characters.
 
 The `"Recording..."` toast is *persistent* — it stays until the recording ends and gets replaced by the next notification automatically.
 
