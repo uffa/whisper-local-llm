@@ -6,6 +6,10 @@
 
 Hotkey-triggered local speech-to-text using [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Hold a key to record, release to transcribe, and the resulting text lands on your clipboard — all running locally on your machine, no cloud. Map the hotkey to a foot pedal if you want push-to-talk hands-free; any Stream Deck / macro tool that can send a numpad `+` will work.
 
+![Recording toast — a persistent notification while the hotkey is held](images/toast-recording.png)
+
+![Copied-to-clipboard toast — bold header with the transcribed text underneath in italic](images/toast-copied.png)
+
 ## How it works
 
 1. An AutoHotkey v2 script binds **NumpadAdd (`+`)** — the `+` key next to the numpad — as a push-to-talk key.
