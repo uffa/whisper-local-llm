@@ -105,15 +105,17 @@ ShowToast(text, iconFile := "", iconIndex := 0, isError := false, persistent := 
 	if multiline {
 		; Wrapping, auto-size vertically. Icon sits at top; text flows down.
 		if (title != "") {
-			; Bold header at the scaled label size, then italic body bumped again.
-			toast.SetFont("s13 cFFFFFF Bold")
+			; Bold header in Segoe UI at the scaled label size, then the
+			; transcript body in Georgia (non-italic) at a larger size so the
+			; natural leading gives more breathing room between wrapped lines.
+			toast.SetFont("s13 cFFFFFF Bold", "Segoe UI")
 			toast.AddText("ys x+24 w928", title)
-			toast.SetFont("s16 cFFFFFF Norm Italic")
+			toast.SetFont("s15 cFFFFFF Norm", "Lora")
 			toast.AddText("xp y+16 w928", text)
 		} else {
-			toast.SetFont("s16 cFFFFFF Italic")
+			toast.SetFont("s15 cFFFFFF Norm", "Lora")
 			toast.AddText("ys x+24 w928", text)
-			toast.SetFont("s13 cFFFFFF Norm")
+			toast.SetFont("s13 cFFFFFF Norm", "Segoe UI")
 		}
 	} else {
 		; h40 matches the icon height; +0x200 is SS_CENTERIMAGE which vertically
