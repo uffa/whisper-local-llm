@@ -2,7 +2,20 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$InputFile,
 
-    [string]$Model = "small.en"
+    # Model filename without the "ggml-" prefix or ".bin" extension.
+    # Examples: "small.en", "medium.en", "large-v3-turbo", "large-v3".
+    [string]$Model = "large-v3-turbo",
+
+    # Initial prompt fed to whisper.cpp to bias the decoder toward specific
+    # vocabulary. Keep it short (a sentence or two plus a list of terms).
+    # whisper.cpp's prompt is capped by the model's context window, so don't
+    # stuff too much here — 200 characters is a safe ceiling.
+    [string]$Prompt = "Technical dictation notes. Common terms: Claude, ChatGPT, Anthropic, whisper.cpp, AutoHotkey, ffmpeg, PowerShell, GitHub, CUDA, NVIDIA, JavaScript, TypeScript, Python, npm.",
+
+    # Beam search width. Higher = more accurate, slower. 5 is whisper.cpp's
+    # default; 10 gives a noticeable accuracy bump on the larger models and
+    # costs very little on a 4070 SUPER-class GPU.
+    [int]$BeamSize = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,7 +57,12 @@ if (Test-Path $cudaRoot) {
 
 Push-Location $whisperRoot
 try {
-    & $exe -m $modelPath -f $InputFile -otxt
+    & $exe `
+        -m $modelPath `
+        -f $InputFile `
+        -otxt `
+        --beam-size $BeamSize `
+        --prompt $Prompt
 }
 finally {
     Pop-Location
