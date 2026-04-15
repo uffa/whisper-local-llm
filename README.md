@@ -8,7 +8,7 @@ Hotkey-triggered local speech-to-text using [whisper.cpp](https://github.com/gge
 
 ![Recording toast — a persistent notification while the hotkey is held](images/toast-recording.png)
 
-![Copied-to-clipboard toast — bold header with the transcribed text underneath in italic](images/toast-copied.png)
+![Copied-to-clipboard toast — bold Segoe UI header with the transcribed text underneath in Lora](images/toast-copied.png)
 
 ## How it works
 
