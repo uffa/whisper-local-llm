@@ -107,12 +107,12 @@ ShowToast(text, iconFile := "", iconIndex := 0, isError := false, persistent := 
 		if (title != "") {
 			; Bold header at the scaled label size, then italic body bumped again.
 			toast.SetFont("s13 cFFFFFF Bold")
-			toast.AddText("ys x+24 w773", title)
+			toast.AddText("ys x+24 w928", title)
 			toast.SetFont("s16 cFFFFFF Norm Italic")
-			toast.AddText("xp y+16 w773", text)
+			toast.AddText("xp y+16 w928", text)
 		} else {
 			toast.SetFont("s16 cFFFFFF Italic")
-			toast.AddText("ys x+24 w773", text)
+			toast.AddText("ys x+24 w928", text)
 			toast.SetFont("s13 cFFFFFF Norm")
 		}
 	} else {
