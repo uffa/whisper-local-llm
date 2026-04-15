@@ -1,0 +1,21 @@
+# Editor / tooling
+.claude/
+.vscode/
+
+# Models and recordings
+models/
+recordings/
+
+# Logs
+*.log
+
+# Transient / debug artifacts
+temp.wav
+ahk-out.txt
+ahk-err.txt
+ffmpeg.pid
+
+# whisper.cpp build artifacts — users download their own builds.
+whisper-cli.exe
+*.dll
+last-transcript.txt
