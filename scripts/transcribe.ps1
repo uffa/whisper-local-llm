@@ -13,9 +13,9 @@ param(
     [string]$Prompt = "Technical dictation notes. Common terms: Claude, ChatGPT, Anthropic, whisper.cpp, AutoHotkey, ffmpeg, PowerShell, GitHub, CUDA, NVIDIA, JavaScript, TypeScript, Python, npm.",
 
     # Beam search width. Higher = more accurate, slower. 5 is whisper.cpp's
-    # default; 10 gives a noticeable accuracy bump on the larger models and
-    # costs very little on a 4070 SUPER-class GPU.
-    [int]$BeamSize = 10
+    # default; 8 is the maximum whisper.cpp allows and gives a noticeable
+    # accuracy bump on the larger models at negligible cost on a modern GPU.
+    [int]$BeamSize = 8
 )
 
 $ErrorActionPreference = "Stop"
