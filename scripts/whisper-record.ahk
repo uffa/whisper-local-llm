@@ -35,6 +35,14 @@ global maxRecordMs := 90000
 ; Hotkey press/release debounce window (ms).
 global debounceMs := 200
 ;
+; Where to anchor the "Copied to clipboard" result toast (the multiline one
+; that shows the transcript). The small status toasts — Recording...,
+; Transcribing..., errors — always appear bottom-right. Valid values:
+; "left"   — bottom-left corner, 20px inset
+; "center" — horizontally centered along the bottom edge
+; "right"  — bottom-right corner, 20px inset
+global resultToastPosition := "left"
+;
 ; ============================================================
 ; === END USER CONFIG ========================================
 ; ============================================================
@@ -63,7 +71,7 @@ try TraySetIcon(iconsDir "\tray-3.ico")
 global currentToast := ""
 
 ShowToast(text, iconFile := "", iconIndex := 0, isError := false, persistent := false, multiline := false, title := "") {
-	global currentToast
+	global currentToast, resultToastPosition
 
 	; Tear down any existing toast so we never stack
 	if IsObject(currentToast) {
@@ -126,8 +134,18 @@ ShowToast(text, iconFile := "", iconIndex := 0, isError := false, persistent := 
 	; Show hidden so AutoSize resolves, measure, then reposition at final spot.
 	toast.Show("Hide AutoSize NoActivate")
 	toast.GetPos(, , &w, &h)
-	MonitorGetWorkArea(, , , &wRight, &wBottom)
-	x := wRight - w - 20
+	MonitorGetWorkArea(, &wLeft, , &wRight, &wBottom)
+	; Status toasts always bottom-right; only the multiline result toast
+	; honors the resultToastPosition setting.
+	if multiline {
+		switch resultToastPosition {
+			case "left": x := wLeft + 20
+			case "center": x := wLeft + ((wRight - wLeft - w) // 2)
+			default: x := wRight - w - 20
+		}
+	} else {
+		x := wRight - w - 20
+	}
 	y := wBottom - h - 20
 	toast.Show("x" x " y" y " NoActivate")
 
