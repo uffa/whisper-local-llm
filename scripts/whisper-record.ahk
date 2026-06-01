@@ -17,10 +17,16 @@ global iconsDir := rootDir "\icons"
 ; === USER CONFIG — edit these to match your system ==========
 ; ============================================================
 ;
-; DirectShow audio input name. List your devices with:
+; DirectShow audio input names. List your devices with:
 ;     ffmpeg -list_devices true -f dshow -i dummy
-; Use the exact string shown for your mic (the entry marked "(audio)").
-global micName := "Microphone (USB audio CODEC)"
+; Use the exact string shown for each mic (the entry marked "(audio)").
+;
+; The script auto-selects at record time: it uses woMicName when the WO Mic
+; client (tablet streaming) is running, otherwise it falls back to localMicName.
+; Keying off the running client — not the device list — avoids recording from a
+; stale WO Mic device that lingers after the tablet disconnects. See ResolveMic.
+global woMicName := "Microphone (WO Mic Device)"
+global localMicName := "Microphone (USB audio CODEC)"
 ;
 ; Leave empty ("") to auto-detect ffmpeg on PATH + common install locations.
 ; Set to an absolute path if the auto-detect doesn't find your install.
@@ -35,6 +41,15 @@ global maxRecordMs := 90000
 ; Hotkey press/release debounce window (ms).
 global debounceMs := 200
 ;
+; Bluetooth shutter press-complete window (ms). The Xenvo Shutterbug streams
+; Volume_Up down events ~30ms apart for each press (and keeps streaming while
+; held), with no reliable release event. We treat one "press" as a burst of
+; downs followed by quiet: once the stream has been quiet this long the press
+; is complete and we toggle recording. Must comfortably exceed the ~30ms repeat
+; cadence (so a gap mid-press never splits one press into two) yet stay short
+; enough that the toggle feels responsive after you tap.
+global shutterIdleStopMs := 400
+;
 ; Where to anchor the "Copied to clipboard" result toast (the multiline one
 ; that shows the transcript). The small status toasts — Recording...,
 ; Transcribing..., errors — always appear bottom-right. Valid values:
@@ -42,6 +57,13 @@ global debounceMs := 200
 ; "center" — horizontally centered along the bottom edge
 ; "right"  — bottom-right corner, 20px inset
 global resultToastPosition := "left"
+;
+; When recording is triggered by the Bluetooth shutter (Volume_Up), paste the
+; transcript into the active window with Ctrl+V right after copying it to the
+; clipboard — so a single tablet tap both copies AND pastes. The keyboard
+; triggers (NumpadAdd, Ctrl+Alt+Space) still only copy. Set to false to copy
+; only for the shutter too.
+global autoPasteShutter := true
 ;
 ; ============================================================
 ; === END USER CONFIG ========================================
@@ -68,24 +90,56 @@ global ffmpeg := ffmpegOverride != "" ? ffmpegOverride : FindFfmpeg()
 ; Tray icon (stays constant — notification icons are drawn by ShowToast below)
 try TraySetIcon(iconsDir "\tray-3.ico")
 
-global currentToast := ""
+global currentToasts := []
 
 ShowToast(text, iconFile := "", iconIndex := 0, isError := false, persistent := false, multiline := false, title := "") {
-	global currentToast, resultToastPosition
+	global currentToasts, resultToastPosition
 
-	; Tear down any existing toast so we never stack
-	if IsObject(currentToast) {
-		try currentToast.Destroy()
-		currentToast := ""
-	}
-	; Also cancel any pending auto-dismiss from a previous toast so it can't
-	; fire on top of this new one.
+	; Tear down any existing toasts so we never stack, and cancel any pending
+	; auto-dismiss from a previous toast so it can't fire on top of this one.
+	DismissToast()
 	SetTimer DismissToast, 0
 
-	; -DpiScale keeps every measurement (control sizes, GetPos, Show coords) in
-	; raw physical pixels so MonitorGetWorkArea and the window size are in the
-	; same unit. Without this, AHK's DPI translation makes GetPos under-report
-	; the rendered width and the toast lands off-screen.
+	; One copy per monitor so the indicator is visible wherever you're looking
+	; (e.g. while the PC is being streamed to the tablet on another display).
+	loop MonitorGetCount() {
+		monIndex := A_Index
+		toast := BuildToast(text, iconFile, iconIndex, isError, multiline, title)
+
+		; Show hidden so AutoSize resolves, measure, then reposition at the
+		; final spot inside THIS monitor's work area.
+		toast.Show("Hide AutoSize NoActivate")
+		toast.GetPos(, , &w, &h)
+		MonitorGetWorkArea(monIndex, &wLeft, , &wRight, &wBottom)
+		; Status toasts always bottom-right; only the multiline result toast
+		; honors the resultToastPosition setting.
+		if multiline {
+			switch resultToastPosition {
+				case "left": x := wLeft + 20
+				case "center": x := wLeft + ((wRight - wLeft - w) // 2)
+				default: x := wRight - w - 20
+			}
+		} else {
+			x := wRight - w - 20
+		}
+		y := wBottom - h - 20
+		toast.Show("x" x " y" y " NoActivate")
+		currentToasts.Push(toast)
+	}
+
+	if !persistent {
+		; Multiline toasts get longer display time so they can actually be read.
+		dismissMs := multiline ? -6000 : -2500
+		SetTimer DismissToast, dismissMs
+	}
+}
+
+; Build (but don't show) one toast GUI; the caller measures and positions it.
+; -DpiScale keeps every measurement (control sizes, GetPos, Show coords) in raw
+; physical pixels so MonitorGetWorkArea and the window size share the same unit.
+; Without this, AHK's DPI translation makes GetPos under-report the rendered
+; width and the toast lands off-screen.
+BuildToast(text, iconFile, iconIndex, isError, multiline, title) {
 	toast := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x08000000 -DpiScale")
 	toast.BackColor := isError ? "3a1e1e" : "1e1e1e"
 
@@ -114,7 +168,7 @@ ShowToast(text, iconFile := "", iconIndex := 0, isError := false, persistent := 
 		; Wrapping, auto-size vertically. Icon sits at top; text flows down.
 		if (title != "") {
 			; Bold header in Segoe UI at the scaled label size, then the
-			; transcript body in Georgia (non-italic) at a larger size so the
+			; transcript body in Lora (non-italic) at a larger size so the
 			; natural leading gives more breathing room between wrapped lines.
 			toast.SetFont("s13 cFFFFFF Bold", "Segoe UI")
 			toast.AddText("ys x+24 w928", title)
@@ -130,39 +184,15 @@ ShowToast(text, iconFile := "", iconIndex := 0, isError := false, persistent := 
 		; centers the text inside the control, independent of font metrics/DPI.
 		toast.AddText("ys x+20 w360 h40 cFFFFFF +0x200", text)
 	}
-
-	; Show hidden so AutoSize resolves, measure, then reposition at final spot.
-	toast.Show("Hide AutoSize NoActivate")
-	toast.GetPos(, , &w, &h)
-	MonitorGetWorkArea(, &wLeft, , &wRight, &wBottom)
-	; Status toasts always bottom-right; only the multiline result toast
-	; honors the resultToastPosition setting.
-	if multiline {
-		switch resultToastPosition {
-			case "left": x := wLeft + 20
-			case "center": x := wLeft + ((wRight - wLeft - w) // 2)
-			default: x := wRight - w - 20
-		}
-	} else {
-		x := wRight - w - 20
-	}
-	y := wBottom - h - 20
-	toast.Show("x" x " y" y " NoActivate")
-
-	currentToast := toast
-	if !persistent {
-		; Multiline toasts get longer display time so they can actually be read.
-		dismissMs := multiline ? -6000 : -2500
-		SetTimer DismissToast, dismissMs
-	}
+	return toast
 }
 
 DismissToast() {
-	global currentToast
-	if IsObject(currentToast) {
-		try currentToast.Destroy()
-		currentToast := ""
+	global currentToasts
+	for toast in currentToasts {
+		try toast.Destroy()
 	}
+	currentToasts := []
 }
 
 ; Runtime state machine
@@ -211,16 +241,60 @@ CleanupOrphanFfmpeg() {
 	TryDelete(ffmpegPidFile)
 }
 
-; Currently only NumpadAdd (+) is bound. The ergonomic A/B test with
-; NumpadEnter is paused — Matt picked + for now. The triggerKey arg is kept
-; so adding another binding back is a one-liner.
+; Local physical keyboard push-to-talk trigger.
 NumpadAdd:: StartRecording("NumpadAdd")
 NumpadAdd Up:: StopRecording("NumpadAdd")
+
+; Remote Desktop / tablet-friendly push-to-talk trigger.
+^!Space:: StartRecording("CtrlAltSpace")
+^!Space Up:: StopRecording("CtrlAltSpace")
+
+; Bluetooth shutter remote (Xenvo Shutterbug) — tap to toggle.
+; Confirmed via KeyHistory: the remote sends Volume_Up (vkAF sc130) as a stream
+; of down events (~30ms apart) for each press, and keeps streaming while held,
+; with no reliable up on release. So we define one "press" by its trailing
+; edge: every down re-arms ShutterPress, and once the stream goes quiet for
+; shutterIdleStopMs the press is complete and we toggle. Trailing-edge means a
+; quick tap and a long hold each count as exactly one toggle, so a hold can't
+; leave it stuck mid-stream. Plain Volume_Up:: also suppresses the native
+; volume-up so system volume doesn't climb.
+Volume_Up:: ShutterDown()
+
+ShutterDown() {
+	global shutterIdleStopMs
+	; (Re)arm the press-complete watchdog on every down; it fires once the
+	; stream stops (button released).
+	SetTimer ShutterPress, -shutterIdleStopMs
+}
+
+ShutterPress() {
+	global state
+	if (state = "idle")
+		StartRecording("Volume_Up")
+	else if (state = "recording")
+		StopRecording("Volume_Up")
+	else
+		Log("shutter press ignored; state=" state)
+}
+
+; Pick the mic at record time: the WO Mic device when the WO Mic client (tablet
+; streaming) is running, otherwise the local mic. Keys off the running client
+; rather than the device list, so a stale WO Mic device left behind after the
+; tablet disconnects can't trick us into recording silence.
+ResolveMic() {
+	global woMicName, localMicName
+	if ProcessExist("WOMicClient.exe") {
+		Log("mic resolve: WO Mic client running -> " woMicName)
+		return woMicName
+	}
+	Log("mic resolve: WO Mic client not running -> " localMicName)
+	return localMicName
+}
 
 StartRecording(triggerKey := "?", *)
 {
 	global state, ffmpegPID, ffmpegHProcess, ffmpegHStdin, currentOutputFile, recordStartTick, lastEventTick
-	global recordingsDir, micName, ffmpeg, debounceMs, maxRecordMs, ffreportEnvValue
+	global recordingsDir, ffmpeg, debounceMs, maxRecordMs, ffreportEnvValue
 	global lastTriggerKey, ffmpegPidFile, iconRec, iconWarn, iconWarnIdx
 
 	if !DebounceOK()
@@ -238,12 +312,13 @@ StartRecording(triggerKey := "?", *)
 	stamp := FormatTime(, "yyyyMMdd-HHmmss")
 	currentOutputFile := recordingsDir "\recording-" stamp ".wav"
 	recordStartTick := A_TickCount
+	mic := ResolveMic()
 
 	; -nostats keeps stdout/stderr quiet so the WshShell.Exec pipes don't fill up.
 	; -loglevel warning still lets us see errors if anything goes wrong.
 	cmd := Format(
 		'"{1}" -hide_banner -nostats -loglevel warning -y -f dshow -i audio="{2}" -ar 16000 -ac 1 "{3}"',
-		ffmpeg, micName, currentOutputFile
+		ffmpeg, mic, currentOutputFile
 	)
 
 	EnvSet("FFREPORT", ffreportEnvValue)
@@ -258,7 +333,7 @@ StartRecording(triggerKey := "?", *)
 		ffmpegHStdin := info["hStdin"]
 		ffmpegPID := info["pid"]
 		state := "recording"
-		Log("recording start via " triggerKey "; file=" currentOutputFile " pid=" ffmpegPID)
+		Log("recording start via " triggerKey "; mic=" mic "; file=" currentOutputFile " pid=" ffmpegPID)
 
 		; Persist pid so a future script start can clean up an orphan of ours
 		try {
@@ -551,7 +626,7 @@ ForceStopRecording() {
 
 TranscribeAndPaste(filePath) {
 	global state, transcribeScript, lastTranscriptFile, lastTriggerKey, transcribeDebugLog
-	global iconRec, iconCheck, iconWarn, iconWarnIdx
+	global iconRec, iconCheck, iconWarn, iconWarnIdx, autoPasteShutter
 
 	if (state = "transcribing") {
 		Log("TranscribeAndPaste re-entry blocked; state already=transcribing")
@@ -613,14 +688,37 @@ TranscribeAndPaste(filePath) {
 				transcript := Trim(FileRead(txtFile, "UTF-8"))
 				A_Clipboard := transcript
 				Log("clipboard updated from " txtFile " (" StrLen(transcript) " chars)")
-				; Show the transcript in the toast so Matt can glance at what got captured.
-				; Truncate very long ones so the toast doesn't take over the screen —
-				; the full text is still on the clipboard regardless.
-				maxToastLen := 400
-				displayText := (StrLen(transcript) > maxToastLen)
-					? SubStr(transcript, 1, maxToastLen) "…"
-					: transcript
-				ShowToast(displayText, iconCheck, 0, false, false, true, "Copied to clipboard")
+
+				; Shutter-only: drop the text straight into the active window so
+				; a tablet tap both copies AND pastes. ClipWait confirms the
+				; clipboard has settled before we send Ctrl+V. The toasts are
+				; NoActivate windows, so focus stays on the user's target app.
+				pasted := false
+				if (autoPasteShutter && lastTriggerKey = "Volume_Up") {
+					if ClipWait(1) {
+						Send("^v")
+						pasted := true
+						Log("auto-pasted via Ctrl+V (trigger=" lastTriggerKey ")")
+					} else {
+						Log("auto-paste skipped: clipboard not ready within 1s")
+					}
+				}
+
+				if (pasted) {
+					; The text is already in the active window, so skip the big
+					; transcript toast (it takes over the screen) and just flash
+					; a small confirmation.
+					ShowToast("Pasted to window", iconCheck)
+				} else {
+					; Copy-only path: show the transcript so Matt can glance at
+					; what got captured. Truncate very long ones so the toast
+					; doesn't take over the screen — full text is on the clipboard.
+					maxToastLen := 400
+					displayText := (StrLen(transcript) > maxToastLen)
+						? SubStr(transcript, 1, maxToastLen) "…"
+						: transcript
+					ShowToast(displayText, iconCheck, 0, false, false, true, "Copied to clipboard")
+				}
 			} catch as err {
 				Log("clipboard update failed: " err.Message)
 				ShowToast("Transcript saved, clipboard failed", iconWarn, iconWarnIdx, true)
